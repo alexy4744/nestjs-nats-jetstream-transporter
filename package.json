@@ -1,0 +1,66 @@
+{
+  "name": "nestjs-nats-jetstream-transporter",
+  "version": "0.0.0",
+  "description": "NATS JetStream transporter for NestJS",
+  "files": [
+    "dist/**/*"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "npm run clean && tsc",
+    "clean": "rimraf ./dist",
+    "coverage": "jest --config ./tests/jest.config.ts --coverage",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "lint": "eslint . --ext .js,.ts",
+    "postversion": "git push && git push --tags",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm test && npm run lint",
+    "preversion": "npm run lint",
+    "test": "jest --config ./tests/jest.config.ts",
+    "test:watch": "jest --config ./tests/jest.config.ts --watch",
+    "version": "npm run format && git add -A src"
+  },
+  "engines": {
+    "node": ">=10.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexy4744/nestjs-nats-jetstream-transporter.git"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/alexy4744/nestjs-nats-jetstream-transporter/issues"
+  },
+  "homepage": "https://github.com/alexy4744/nestjs-nats-jetstream-transporter#readme",
+  "devDependencies": {
+    "@nestjs/common": "^7.6.14",
+    "@nestjs/core": "^7.6.14",
+    "@nestjs/microservices": "^7.6.17",
+    "@nestjs/platform-express": "^7.6.14",
+    "@nestjs/testing": "^7.6.14",
+    "@types/jest": "^26.0.20",
+    "@types/node": "^14.14.35",
+    "@typescript-eslint/eslint-plugin": "^4.18.0",
+    "@typescript-eslint/parser": "^4.18.0",
+    "eslint": "^7.22.0",
+    "eslint-config-prettier": "^8.1.0",
+    "jest": "^26.6.3",
+    "nats": "^2.0.6",
+    "prettier": "^2.2.1",
+    "reflect-metadata": "^0.1.13",
+    "rimraf": "^3.0.2",
+    "rxjs": "^6.6.6",
+    "ts-jest": "^26.5.3",
+    "ts-node": "^9.1.1",
+    "typescript": "^4.2.3"
+  },
+  "peerDependencies": {
+    "@nestjs/common": "^7.0.0",
+    "@nestjs/core": "^7.0.0",
+    "@nestjs/microservices": "^7.6.17",
+    "nats": "^2.0.6",
+    "reflect-metadata": "^0.1.12",
+    "rxjs": "^6.0.0"
+  }
+}
