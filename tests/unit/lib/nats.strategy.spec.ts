@@ -426,27 +426,6 @@ describe("NatsTransportStrategy", () => {
       expect(client.subscribe).toBeCalledTimes(1);
       expect(client.subscribe).toBeCalledWith("my.event", consumerOptions);
     });
-
-    it("should use the queue name on the consumer if provided", async () => {
-      strategy.addHandler("my.event", jest.fn(), true);
-
-      strategy["options"].queue = "my-queue";
-
-      const client = createMock<JetStreamClient>();
-
-      await strategy.subscribeToEventPatterns(client);
-
-      const consumerOptions = expect.objectContaining({
-        config: expect.objectContaining({
-          deliver_subject: expect.stringMatching(/^_INBOX\./)
-        }),
-        qname: "my-queue",
-        mack: true
-      });
-
-      expect(client.subscribe).toBeCalledTimes(1);
-      expect(client.subscribe).toBeCalledWith("my.event", consumerOptions);
-    });
   });
 
   describe("subscribeToMessagePatterns", () => {

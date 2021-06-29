@@ -184,10 +184,6 @@ export class NatsTransportStrategy extends Server implements CustomTransportStra
         );
       }
 
-      if (!consumerOptions.qname && this.options.queue) {
-        consumerOptions.queue(this.options.queue);
-      }
-
       consumerOptions.callback((error, message) => {
         if (error) {
           return this.logger.error(error.message, error.stack);
