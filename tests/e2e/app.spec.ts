@@ -1,9 +1,12 @@
 import { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
+import { Server } from "http";
 
-import { AppModule } from "../src/app/app.module";
+import { AppModule } from "./src/app/app.module";
 
 describe("App", () => {
+  test.todo("e2e");
+
   let server: Server;
   let app: INestApplication;
 

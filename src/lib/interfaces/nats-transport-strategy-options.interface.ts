@@ -1,4 +1,4 @@
-import { Codec, ConnectionOptions, ConsumerConfig } from "nats";
+import { Codec, ConnectionOptions, ConsumerOptsBuilder } from "nats";
 
 import { NatsStreamConfig } from "./nats-stream-config.interface";
 
@@ -18,7 +18,7 @@ export interface NatsTransportStrategyOptions {
    * @see https://docs.nats.io/jetstream/concepts/consumers
    * @see https://github.com/nats-io/nats.deno/blob/main/jetstream.md#push-subscriptions
    */
-  consumer?: Partial<ConsumerConfig>;
+  consumer?: (options: ConsumerOptsBuilder) => void;
 
   /**
    * Queue group name

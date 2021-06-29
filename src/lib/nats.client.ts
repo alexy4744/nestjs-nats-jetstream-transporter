@@ -1,7 +1,14 @@
 import { ClientProxy, ReadPacket, WritePacket } from "@nestjs/microservices";
 import { Logger } from "@nestjs/common";
 
-import { Codec, JetStreamClient, JSONCodec, NatsConnection, connect } from "nats";
+import {
+  Codec,
+  JetStreamClient,
+  JSONCodec,
+  NatsConnection,
+  connect,
+  ConnectionOptions
+} from "nats";
 
 import { noop } from "rxjs";
 
@@ -11,7 +18,7 @@ export class NatsClient extends ClientProxy {
   protected readonly codec: Codec<unknown>;
   protected readonly logger: Logger;
 
-  protected client?: NatsConnection;
+  protected connection?: NatsConnection;
   protected jetstreamClient?: JetStreamClient;
 
   constructor(protected readonly options: NatsClientOptions = {}) {
@@ -21,52 +28,81 @@ export class NatsClient extends ClientProxy {
   }
 
   async connect(): Promise<NatsConnection> {
-    if (this.client) {
-      return this.client;
+    if (this.connection) {
+      return this.connection;
     }
 
-    const client = await connect(this.options.connection);
-    const jetstreamClient = client.jetstream();
+    this.connection = await this.createNatsConnection(this.options.connection);
+    this.jetstreamClient = this.createJetStreamClient(this.connection);
 
-    this.client = client;
-    this.jetstreamClient = jetstreamClient;
+    this.handleStatusUpdates(this.connection);
 
-    this.handleStatusUpdates(client);
+    this.logger.log(`Connected to ${this.connection.getServer()}`);
 
-    this.logger.log(`Connected to ${client.getServer()}`);
-
-    return client;
+    return this.connection;
   }
 
   async close(): Promise<void> {
-    if (this.client) {
-      await this.client.drain();
+    if (this.connection) {
+      await this.connection.drain();
 
-      this.client = undefined;
+      this.connection = undefined;
       this.jetstreamClient = undefined;
     }
   }
 
-  emitAsync<Pattern, Payload, Result>(pattern: Pattern, payload: Payload): Promise<Result> {
-    return this.emit(pattern, payload).toPromise();
+  createJetStreamClient(connection: NatsConnection): JetStreamClient {
+    return connection.jetstream();
   }
 
-  getClient(): NatsConnection | undefined {
-    return this.client;
+  createNatsConnection(options: ConnectionOptions = {}): Promise<NatsConnection> {
+    return connect(options);
+  }
+
+  getConnection(): NatsConnection | undefined {
+    return this.connection;
   }
 
   getJetStreamClient(): JetStreamClient | undefined {
     return this.jetstreamClient;
   }
 
-  sendAsync<Pattern, Payload, Result>(pattern: Pattern, payload: Payload): Promise<Result> {
-    return this.send(pattern, payload).toPromise();
+  async handleStatusUpdates(connection: NatsConnection): Promise<void> {
+    for await (const status of connection.status()) {
+      const data = typeof status.data === "object" ? JSON.stringify(status.data) : status.data;
+      const message = `(${status.type}): ${data}`;
+
+      switch (status.type) {
+        case "pingTimer":
+        case "reconnecting":
+        case "staleConnection":
+          this.logger.debug(message);
+          break;
+
+        case "disconnect":
+        case "error":
+          this.logger.error(message);
+          break;
+
+        case "reconnect":
+          this.logger.log(message);
+          break;
+
+        case "ldm":
+          this.logger.warn(message);
+          break;
+
+        case "update":
+          this.logger.verbose(message);
+          break;
+      }
+    }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   protected async dispatchEvent(packet: ReadPacket): Promise<any> {
     if (!this.jetstreamClient) {
-      throw new Error("JetStream client not connected!");
+      throw new Error("JetStream not connected!");
     }
 
     const payload = this.codec.encode(packet.data);
@@ -76,14 +112,14 @@ export class NatsClient extends ClientProxy {
   }
 
   protected publish(packet: ReadPacket, callback: (packet: WritePacket) => void): typeof noop {
-    if (!this.client) {
-      throw new Error("NATS client not connected!");
+    if (!this.connection) {
+      throw new Error("NATS not connected!");
     }
 
     const payload = this.codec.encode(packet.data);
     const subject = this.normalizePattern(packet.pattern);
 
-    this.client
+    this.connection
       .request(subject, payload)
       .then((encoded) => this.codec.decode(encoded.data) as WritePacket)
       .then((packet) => callback(packet))
@@ -91,17 +127,5 @@ export class NatsClient extends ClientProxy {
 
     // No teardown function needed as the subscription is handled for us, so return noop
     return noop;
-  }
-
-  protected async handleStatusUpdates(client: NatsConnection): Promise<void> {
-    for await (const { data, type } of client.status()) {
-      const payload = JSON.stringify(data, null, 2);
-
-      if (type === "disconnect" || type === "error") {
-        this.logger.error(`NatsError: type: "${type}", data: "${payload}".`);
-      } else {
-        this.logger.log(`NatsStatus: type: "${type}", data: "${payload}".`);
-      }
-    }
   }
 }

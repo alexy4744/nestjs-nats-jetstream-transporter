@@ -29,11 +29,4 @@ export class NatsContext extends BaseRpcContext<NatsContextArgs> {
   getSubject(): string {
     return this.args[0].subject;
   }
-
-  /**
-   * Check whether a NATS message is a JetStream message
-   */
-  isJetStreamMessage(message: JsMsg | Msg): message is JsMsg {
-    return typeof (message as Msg).respond === "function";
-  }
 }

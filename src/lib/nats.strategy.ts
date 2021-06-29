@@ -3,7 +3,8 @@ import { Logger } from "@nestjs/common";
 
 import {
   Codec,
-  ConsumerInfo,
+  ConnectionOptions,
+  JetStreamClient,
   JetStreamManager,
   JsMsg,
   JSONCodec,
@@ -11,10 +12,11 @@ import {
   NatsConnection,
   StreamInfo,
   connect,
+  consumerOpts,
   createInbox
 } from "nats";
 
-import { toJsMsg } from "nats/lib/nats-base-client/jsmsg";
+import { ConsumerOptsBuilderImpl } from "nats/lib/nats-base-client/jsconsumeropts";
 
 import { noop } from "rxjs";
 
@@ -29,66 +31,95 @@ export class NatsTransportStrategy extends Server implements CustomTransportStra
   protected readonly codec: Codec<unknown>;
   protected readonly logger: Logger;
 
-  protected client?: NatsConnection;
+  protected connection?: NatsConnection;
+  protected jetstreamClient?: JetStreamClient;
+  protected jetstreamManager?: JetStreamManager;
 
-  constructor(protected readonly options: NatsTransportStrategyOptions) {
+  constructor(protected readonly options: NatsTransportStrategyOptions = {}) {
     super();
     this.codec = options.codec || JSONCodec();
     this.logger = new Logger("NatsServer");
   }
 
   async listen(callback: typeof noop): Promise<void> {
-    const client = await connect(this.options.connection);
-    const jetstreamManager = await client.jetstreamManager();
+    this.connection = await this.createNatsConnection(this.options.connection);
+    this.jetstreamClient = this.createJetStreamClient(this.connection);
+    this.jetstreamManager = await this.createJetStreamManager(this.connection);
 
-    this.client = client;
+    this.handleStatusUpdates(this.connection);
 
-    this.handleStatusUpdates(client);
+    await this.createStreams(this.jetstreamManager, this.options.streams);
 
-    await this.createStreams(jetstreamManager, this.options.streams);
+    await this.subscribeToEventPatterns(this.jetstreamClient);
 
-    await this.subscribeToEventPatterns(client, jetstreamManager);
-    await this.subscribeToMessagePatterns(client);
+    this.subscribeToMessagePatterns(this.connection);
 
-    this.logger.log(`Connected to ${client.getServer()}`);
+    this.logger.log(`Connected to ${this.connection.getServer()}`);
 
     callback();
   }
 
   async close(): Promise<void> {
-    if (this.client) {
-      await this.client.drain();
+    if (this.connection) {
+      await this.connection.drain();
+
+      this.connection = undefined;
+      this.jetstreamClient = undefined;
+      this.jetstreamManager = undefined;
     }
   }
 
-  protected async createStreams(
-    manager: JetStreamManager,
-    configs: NatsStreamConfig[] = []
-  ): Promise<StreamInfo[]> {
-    return Promise.all(configs.map((config) => this.upsertStream(manager, config)));
+  /**
+   * Create a durable name that follows NATS naming rules
+   * @see https://docs.nats.io/jetstream/administration/naming
+   */
+  createDurableName(...parts: string[]): string {
+    return parts.join("-").replace(/\s|\.|>|\*/g, "-");
   }
 
-  protected async handleJetStreamMessage(message: JsMsg, handler: MessageHandler): Promise<void> {
+  createJetStreamClient(connection: NatsConnection): JetStreamClient {
+    return connection.jetstream();
+  }
+
+  createJetStreamManager(connection: NatsConnection): Promise<JetStreamManager> {
+    return connection.jetstreamManager();
+  }
+
+  createNatsConnection(options: ConnectionOptions = {}): Promise<NatsConnection> {
+    return connect(options);
+  }
+
+  async createStreams(manager: JetStreamManager, configs: NatsStreamConfig[] = []): Promise<void> {
+    await Promise.all(configs.map((config) => this.upsertStream(manager, config)));
+  }
+
+  async handleJetStreamMessage(message: JsMsg, handler: MessageHandler): Promise<void> {
     const decoded = this.codec.decode(message.data);
 
     message.working();
 
-    const signal = await handler(decoded, new NatsContext([message]))
-      .then((maybeObservable) => this.transformToObservable(maybeObservable))
-      .then((observable) => observable.toPromise());
+    try {
+      const signal = await handler(decoded, new NatsContext([message]))
+        .then((maybeObservable) => this.transformToObservable(maybeObservable))
+        .then((observable) => observable.toPromise());
 
-    if (signal === NACK) {
-      return message.nak();
+      if (signal === NACK) {
+        return message.nak();
+      }
+
+      if (signal === TERM) {
+        return message.term();
+      }
+
+      message.ack();
+    } catch (error) {
+      message.nak();
+
+      throw error;
     }
-
-    if (signal === TERM) {
-      return message.term();
-    }
-
-    message.ack();
   }
 
-  protected async handleNatsMessage(message: Msg, handler: MessageHandler): Promise<void> {
+  async handleNatsMessage(message: Msg, handler: MessageHandler): Promise<void> {
     const decoded = this.codec.decode(message.data);
 
     const maybeObservable = await handler(decoded, new NatsContext([message]));
@@ -101,77 +132,89 @@ export class NatsTransportStrategy extends Server implements CustomTransportStra
     });
   }
 
-  protected async handleStatusUpdates(client: NatsConnection): Promise<void> {
-    for await (const { data, type } of client.status()) {
-      const payload = JSON.stringify(data, null, 2);
+  async handleStatusUpdates(connection: NatsConnection): Promise<void> {
+    for await (const status of connection.status()) {
+      const data = typeof status.data === "object" ? JSON.stringify(status.data) : status.data;
+      const message = `(${status.type}): ${data}`;
 
-      if (type === "disconnect" || type === "error") {
-        this.logger.error(`NatsError: type: "${type}", data: "${payload}".`);
-      } else {
-        this.logger.verbose(`NatsStatus: type: "${type}", data: "${payload}".`);
+      switch (status.type) {
+        case "pingTimer":
+        case "reconnecting":
+        case "staleConnection":
+          this.logger.debug(message);
+          break;
+
+        case "disconnect":
+        case "error":
+          this.logger.error(message);
+          break;
+
+        case "reconnect":
+          this.logger.log(message);
+          break;
+
+        case "ldm":
+          this.logger.warn(message);
+          break;
+
+        case "update":
+          this.logger.verbose(message);
+          break;
       }
     }
   }
 
-  protected async subscribeToEventPatterns(
-    client: NatsConnection,
-    manager: JetStreamManager
-  ): Promise<void> {
+  async subscribeToEventPatterns(client: JetStreamClient): Promise<void> {
     const eventHandlers = [...this.messageHandlers.entries()].filter(
       ([, handler]) => handler.isEventHandler
     );
 
     for (const [pattern, handler] of eventHandlers) {
-      const stream = await this.findStream(manager, pattern);
+      // Need to access config options that is not exposed by the ConsumerOptsBuilder interface
+      // https://github.com/nats-io/nats.deno/blob/main/nats-base-client/jsconsumeropts.ts#L55
+      const consumerOptions = consumerOpts() as ConsumerOptsBuilderImpl;
 
-      if (!stream) {
-        this.logger.warn(`No stream found for the event pattern "${pattern}"`);
-        continue;
+      if (this.options.consumer) {
+        this.options.consumer(consumerOptions);
       }
 
-      let consumer = await this.findConsumer(manager, stream.config.name, (consumer) => {
-        return consumer.config.filter_subject === pattern;
-      });
-
-      if (!consumer) {
-        const options = Object.assign({}, this.options.consumer);
-
-        if (!options.deliver_subject) {
-          options.deliver_subject = createInbox();
-        }
-
-        if (options.durable_name) {
-          options.durable_name = this.createDurableName(options.durable_name, pattern);
-        }
-
-        options.filter_subject = pattern;
-
-        consumer = await manager.consumers.add(stream.config.name, options);
+      if (consumerOptions.config.durable_name) {
+        consumerOptions.durable(
+          this.createDurableName(consumerOptions.config.durable_name, pattern)
+        );
       }
 
-      // Can't use the jetstream client because it does not allow queue group subscriptions
-      client.subscribe(consumer.config.deliver_subject as string, {
-        callback: (error, message) => {
-          if (error) {
-            return this.logger.error(error.message, error.stack);
-          }
+      if (!consumerOptions.qname && this.options.queue) {
+        consumerOptions.queue(this.options.queue);
+      }
 
-          return this.handleJetStreamMessage(toJsMsg(message), handler);
-        },
-        queue: this.options.queue
+      consumerOptions.callback((error, message) => {
+        if (error) {
+          return this.logger.error(error.message, error.stack);
+        }
+
+        if (message) {
+          return this.handleJetStreamMessage(message, handler);
+        }
       });
 
-      this.logger.verbose(`Subscribed to "${pattern}" events`);
+      consumerOptions.deliverTo(createInbox());
+
+      consumerOptions.manualAck();
+
+      await client.subscribe(pattern, consumerOptions);
+
+      this.logger.log(`Subscribed to ${pattern} events`);
     }
   }
 
-  protected async subscribeToMessagePatterns(client: NatsConnection): Promise<void> {
+  subscribeToMessagePatterns(connection: NatsConnection): void {
     const messageHandlers = [...this.messageHandlers.entries()].filter(
       ([, handler]) => !handler.isEventHandler
     );
 
     for (const [pattern, handler] of messageHandlers) {
-      client.subscribe(pattern, {
+      connection.subscribe(pattern, {
         callback: (error, message) => {
           if (error) {
             return this.logger.error(error.message, error.stack);
@@ -182,82 +225,28 @@ export class NatsTransportStrategy extends Server implements CustomTransportStra
         queue: this.options.queue
       });
 
-      this.logger.verbose(`Subscribed to "${pattern}" messages`);
-    }
-  }
-
-  /**
-   * Create a durable name that follows NATS naming rules
-   * @see https://docs.nats.io/jetstream/administration/naming
-   */
-  protected createDurableName(...parts: string[]): string {
-    return parts.join("-").replace(/\s|\.|>|\*/g, "-");
-  }
-
-  /**
-   * Find a consumer of a stream based on a predicate
-   */
-  protected async findConsumer(
-    manager: JetStreamManager,
-    stream: string,
-    predicate: (consumer: ConsumerInfo) => boolean
-  ): Promise<ConsumerInfo | null> {
-    const lister = manager.consumers.list(stream);
-
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const consumers = await lister.next();
-
-      if (consumers.length <= 0) {
-        return null;
-      }
-
-      for (const consumer of consumers) {
-        if (predicate(consumer)) {
-          return consumer;
-        }
-      }
-    }
-  }
-
-  /**
-   * Find a stream by subject
-   */
-  protected async findStream(
-    manager: JetStreamManager,
-    subject: string
-  ): Promise<StreamInfo | null> {
-    try {
-      const name = await manager.streams.find(subject);
-      const stream = await manager.streams.info(name);
-
-      return stream;
-    } catch (error) {
-      if (error.message === "no stream matches subject") {
-        return null;
-      }
-
-      throw error;
+      this.logger.log(`Subscribed to ${pattern} messages`);
     }
   }
 
   /**
    * Creates a new stream if it doesn't exist, otherwise updates the existing stream
    */
-  protected async upsertStream(
-    manager: JetStreamManager,
-    config: NatsStreamConfig
-  ): Promise<StreamInfo> {
+  async upsertStream(manager: JetStreamManager, config: NatsStreamConfig): Promise<StreamInfo> {
     try {
       const stream = await manager.streams.info(config.name);
 
-      return manager.streams.update({
+      const updated = await manager.streams.update({
         ...stream.config,
         ...config
       });
+
+      return updated;
     } catch (error) {
       if (error.message === "stream not found") {
-        return manager.streams.add(config);
+        const added = await manager.streams.add(config);
+
+        return added;
       }
 
       throw error;
