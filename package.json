@@ -2,6 +2,14 @@
   "name": "nestjs-nats-jetstream-transporter",
   "version": "1.0.0",
   "description": "NATS JetStream transporter for NestJS",
+  "keywords": [
+    "nestjs",
+    "nats",
+    "microservices",
+    "jetstream",
+    "nats-jetstream",
+    "messaging"
+  ],
   "files": [
     "dist/**/*"
   ],
