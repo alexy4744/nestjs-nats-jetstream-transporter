@@ -10,8 +10,7 @@ import { NatsTransportStrategy } from "../../../src";
     strategy: new NatsTransportStrategy({
       connection: {
         port: 4222
-      },
-      consumer: (options) => {}
+      }
     })
   });
 
