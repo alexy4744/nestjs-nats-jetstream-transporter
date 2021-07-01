@@ -15,8 +15,8 @@ export interface NatsTransportStrategyOptions {
 
   /**
    * Consumer options for JetStream subscriptions
-   * @see https://docs.nats.io/jetstream/concepts/consumers
    * @see https://github.com/nats-io/nats.deno/blob/main/jetstream.md#push-subscriptions
+   * @see https://docs.nats.io/jetstream/concepts/consumers
    */
   consumer?: (options: ConsumerOptsBuilder) => void;
 
@@ -35,6 +35,7 @@ export interface NatsTransportStrategyOptions {
   queue?: string;
 
   /**
+   * @see https://github.com/nats-io/nats.deno/blob/main/jetstream.md#jetstreammanager
    * @see https://docs.nats.io/jetstream/concepts/streams
    */
   streams?: NatsStreamConfig[];
