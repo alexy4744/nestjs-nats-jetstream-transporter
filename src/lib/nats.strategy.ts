@@ -201,9 +201,17 @@ export class NatsTransportStrategy extends Server implements CustomTransportStra
 
       consumerOptions.manualAck();
 
-      await client.subscribe(pattern, consumerOptions);
+      try {
+        await client.subscribe(pattern, consumerOptions);
 
-      this.logger.log(`Subscribed to ${pattern} events`);
+        this.logger.log(`Subscribed to ${pattern} events`);
+      } catch (error) {
+        if (error.message === "no stream matches subject") {
+          throw new Error(`Cannot find stream with the ${pattern} event pattern`);
+        }
+
+        throw error;
+      }
     }
   }
 
