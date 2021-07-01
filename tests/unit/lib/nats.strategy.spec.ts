@@ -191,26 +191,6 @@ describe("NatsTransportStrategy", () => {
       expect(message.working).toBeCalledTimes(1);
     });
 
-    it("should nack on error", async () => {
-      const message = createMock<JsMsg>({
-        data: new Uint8Array([104, 101, 108, 108, 111])
-      });
-
-      const handler = jest.fn().mockImplementation(() => {
-        throw new Error();
-      });
-
-      await expect(strategy.handleJetStreamMessage(message, handler)).rejects.toBeInstanceOf(Error);
-
-      expect(handler).toBeCalledTimes(1);
-      expect(handler).toBeCalledWith("hello", createMock<NatsContext>());
-
-      expect(message.ack).not.toBeCalled();
-      expect(message.nak).toBeCalledTimes(1);
-      expect(message.term).not.toBeCalled();
-      expect(message.working).toBeCalledTimes(1);
-    });
-
     it("should term", async () => {
       const message = createMock<JsMsg>({
         data: new Uint8Array([104, 101, 108, 108, 111])
@@ -226,6 +206,48 @@ describe("NatsTransportStrategy", () => {
       expect(message.ack).not.toBeCalled();
       expect(message.nak).not.toBeCalled();
       expect(message.term).toBeCalledTimes(1);
+      expect(message.working).toBeCalledTimes(1);
+    });
+
+    it("should term on error by default", async () => {
+      const message = createMock<JsMsg>({
+        data: new Uint8Array([104, 101, 108, 108, 111])
+      });
+
+      const handler = jest.fn().mockImplementation(() => {
+        throw new Error();
+      });
+
+      await expect(strategy.handleJetStreamMessage(message, handler)).rejects.toBeInstanceOf(Error);
+
+      expect(handler).toBeCalledTimes(1);
+      expect(handler).toBeCalledWith("hello", createMock<NatsContext>());
+
+      expect(message.ack).not.toBeCalled();
+      expect(message.nak).not.toBeCalled();
+      expect(message.term).toBeCalledTimes(1);
+      expect(message.working).toBeCalledTimes(1);
+    });
+
+    it("should nack on error", async () => {
+      const message = createMock<JsMsg>({
+        data: new Uint8Array([104, 101, 108, 108, 111])
+      });
+
+      const handler = jest.fn().mockImplementation(() => {
+        throw new Error();
+      });
+
+      strategy["options"].onError = (message) => message.nak();
+
+      await expect(strategy.handleJetStreamMessage(message, handler)).rejects.toBeInstanceOf(Error);
+
+      expect(handler).toBeCalledTimes(1);
+      expect(handler).toBeCalledWith("hello", createMock<NatsContext>());
+
+      expect(message.ack).not.toBeCalled();
+      expect(message.nak).toBeCalledTimes(1);
+      expect(message.term).not.toBeCalled();
       expect(message.working).toBeCalledTimes(1);
     });
   });

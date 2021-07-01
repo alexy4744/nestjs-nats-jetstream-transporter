@@ -87,6 +87,8 @@ export class OrdersController {
 }
 ```
 
+#### NACK a
+
 ## Receiving Messages
 
 There are no special changes needed to receive messages. Just use the `@EventPattern()` and `@MessagePattern()` decorators provided by NestJS.

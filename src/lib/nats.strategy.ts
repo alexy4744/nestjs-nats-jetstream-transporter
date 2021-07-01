@@ -21,6 +21,7 @@ import { ConsumerOptsBuilderImpl } from "nats/lib/nats-base-client/jsconsumeropt
 import { noop } from "rxjs";
 
 import { NatsTransportStrategyOptions } from "./interfaces/nats-transport-strategy-options.interface";
+
 import { NatsStreamConfig } from "./interfaces/nats-stream-config.interface";
 
 import { NatsContext } from "./nats.context";
@@ -94,11 +95,13 @@ export class NatsTransportStrategy extends Server implements CustomTransportStra
   }
 
   async handleJetStreamMessage(message: JsMsg, handler: MessageHandler): Promise<void> {
-    const decoded = this.codec.decode(message.data);
-
-    message.working();
+    const handleError = this.options.onError || ((message) => message.term());
 
     try {
+      const decoded = this.codec.decode(message.data);
+
+      message.working();
+
       const signal = await handler(decoded, new NatsContext([message]))
         .then((maybeObservable) => this.transformToObservable(maybeObservable))
         .then((observable) => observable.toPromise());
@@ -113,7 +116,7 @@ export class NatsTransportStrategy extends Server implements CustomTransportStra
 
       message.ack();
     } catch (error) {
-      message.nak();
+      handleError(message);
 
       throw error;
     }
