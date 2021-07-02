@@ -115,10 +115,8 @@ export class NatsTransportStrategy extends Server implements CustomTransportStra
       }
 
       message.ack();
-    } catch (error) {
+    } catch {
       handleError(message);
-
-      throw error;
     }
   }
 

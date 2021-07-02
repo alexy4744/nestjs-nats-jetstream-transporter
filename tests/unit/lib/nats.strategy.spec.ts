@@ -218,7 +218,7 @@ describe("NatsTransportStrategy", () => {
         throw new Error();
       });
 
-      await expect(strategy.handleJetStreamMessage(message, handler)).rejects.toBeInstanceOf(Error);
+      await strategy.handleJetStreamMessage(message, handler);
 
       expect(handler).toBeCalledTimes(1);
       expect(handler).toBeCalledWith("hello", createMock<NatsContext>());
@@ -240,7 +240,7 @@ describe("NatsTransportStrategy", () => {
 
       strategy["options"].onError = (message) => message.nak();
 
-      await expect(strategy.handleJetStreamMessage(message, handler)).rejects.toBeInstanceOf(Error);
+      await strategy.handleJetStreamMessage(message, handler);
 
       expect(handler).toBeCalledTimes(1);
       expect(handler).toBeCalledWith("hello", createMock<NatsContext>());
