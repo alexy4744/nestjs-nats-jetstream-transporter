@@ -1,8 +1,8 @@
-# NestJS Nats JetStream Transpoter
+# NestJS NATS JetStream Transporter
 
 A NATS transporter for NestJS that takes advantage of [JetStream](https://docs.nats.io/jetstream/jetstream) for event patterns.
 
-- [NestJS Nats JetStream Transpoter](#nestjs-nats-jetstream-transpoter)
+- [NestJS NATS JetStream Transporter](#nestjs-nats-jetstream-transporter)
   - [Installation](#installation)
   - [Publishing Messages](#publishing-messages)
     - [Request-Reply](#request-reply)
